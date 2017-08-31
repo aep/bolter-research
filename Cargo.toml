@@ -1,0 +1,11 @@
+[package]
+name = "bitchop"
+version = "0.1.0"
+authors = ["Arvid E. Picciani <aep@exys.org>"]
+
+[dependencies]
+elf = "0.0.10"
+sha2 = "0.6"
+term = "0.4.6"
+
+
