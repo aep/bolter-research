@@ -19,11 +19,10 @@ struct Cut {
     debug: String,
 }
 
-fn cut_elf<T>(mut io: T) -> Result<Box<Iterator<Item=Cut>>, elf::ParseError>  where T: Read + Seek {
+fn symbols<T>(mut io: T) -> Result<Box<Iterator<Item=Cut>>, elf::ParseError>  where T: Read + Seek {
     let f = elf::File::open_stream(&mut io)?;
 
     let mut symtab_section_offset = 0;
-
 
     let section_iterator = f.sections.iter();
     let section_iterator = section_iterator.flat_map(|sec| {
@@ -52,6 +51,21 @@ fn cut_elf<T>(mut io: T) -> Result<Box<Iterator<Item=Cut>>, elf::ParseError>  wh
                 };
                 cuts.into_iter()
             }
+            &_ => {vec![].into_iter()},
+        }
+    }).collect::<Vec<Cut>>().into_iter();
+
+    Ok(Box::new(section_iterator))
+}
+
+fn sections<T>(mut io: T) -> Result<Box<Iterator<Item=Cut>>, elf::ParseError>  where T: Read + Seek {
+    let f = elf::File::open_stream(&mut io)?;
+
+    let mut symtab_section_offset = 0;
+
+    let section_iterator = f.sections.iter();
+    let section_iterator = section_iterator.flat_map(|sec| {
+        match &sec.shdr.name as &str {
             &_ => {
                 vec![Cut{
                     offset: sec.shdr.offset,
@@ -66,31 +80,46 @@ fn cut_elf<T>(mut io: T) -> Result<Box<Iterator<Item=Cut>>, elf::ParseError>  wh
 }
 
 
-
-
-
 fn main() {
 
     let mut blocks: HashMap<Vec<u8>, bool> = HashMap::new();
-    let mut insize      = 0;
-    let mut outsize     = 0;
+    let mut insize   = 0;
+    let mut outsize  = 0;
 
+    let mut filei = 0;
     for filename in env::args().skip(1) {
-        println!("");
-        println!("|{:<7}|{:<7}|{:64}|{:.20}", "size", "offset", "hash", "symbol");
 
-        println!("-------------------------------------------------------------------------------------------");
+        if filei > 0 {
+            println!("");
+            println!("|{:<7}|{:<7}|{:64}|{:.20}", "size", "offset", "hash", "symbol");
+
+            println!("-------------------------------------------------------------------------------------------");
+        }
+
+        let mut cuts : Vec<Cut> = Vec::new();
+
         let path = PathBuf::from(filename.clone());
         let mut file = OpenOptions::new().read(true).write(true).open(path).unwrap();
-
-
         let file_len = file.metadata().unwrap().len();
         insize += file_len;
-        let mut cuts : Vec<Cut> = cut_elf(&mut file).unwrap().collect();
         cuts.push(Cut{
             offset: file_len,
             debug: String::from("EOF"),
         });
+
+
+        //read symbols from .d file
+        {
+            let path = PathBuf::from(filename.clone() + ".d");
+            let mut file = OpenOptions::new().read(true).write(true).open(path).unwrap();
+            let mut c2 :  Vec<Cut> = symbols(&mut file).unwrap().collect();
+            cuts.append(&mut c2);
+        }
+
+        //read sections from target file
+        let mut c2 :  Vec<Cut> = sections(&mut file).unwrap().collect();
+        cuts.append(&mut c2);
+
 
         cuts.sort_by(|a, b| a.offset.cmp(&b.offset));
 
@@ -115,16 +144,23 @@ fn main() {
 
             if let None = blocks.insert(hash.as_slice().to_vec(), true) {
                 outsize += blocksize;
-                print!("{}", "+".red())
+                if filei > 0 {
+                    print!("{}", "+".red())
+                }
             } else {
-                print!("{}", "=".green())
+                if filei > 0 {
+                    print!("{}", "=".green())
+                }
             }
-            println!("{:<7}|{:<7}|{:x}|{:.40}", blocksize, previous_block, hash, this_debug);
+            if filei > 0 {
+                println!("{:<7x}|{:<7x}|{:x}|{:.40}", blocksize, previous_block, hash, this_debug);
+            }
 
             //this marker is actually the start of the next section
             previous_block = cut.offset;
             this_debug     = cut.debug;
         }
+        filei +=1;
         println!("==============================================");
         let pc = 100.0 * (outsize as f32 / insize as f32);
         println!("files size: {} after dedup: {} ({:.2}%) blocks: {}", insize, outsize, pc, blocks.len());

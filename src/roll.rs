@@ -57,7 +57,9 @@ H: sha2::Digest<OutputSize=N> + Default
                 if some < 1 {
                     return false;
                 } else {
-                    self.buflen = some;
+                    self.buflen  = some;
+                    self.bufpos  = 0;
+                    self.hashpos = 0;
                     return true;
                 }
             }
@@ -78,17 +80,28 @@ H: sha2::Digest<OutputSize=N> + Default,
 {
     type Item = Chunk;
     fn next(&mut self) -> Option<Self::Item> {
-        let chunk_mask = (1 << 15) - 1;
+        let chunk_mask = (1 << 11) - 1;
 
         loop {
             if self.bufpos >= self.buflen {
                 self.hasher.input(&self.buf[self.hashpos..self.buflen]);
-                self.bufpos  = 0;
-                self.buflen  = 0;
-                self.hashpos = 0;
+
                 if !self.fill() {
+                    let rest = self.buflen - self.hashpos;
+                    if rest  > 0 {
+                        let hash = std::mem::replace(&mut self.hasher, H::default()).result();
+                        let r = Chunk{
+                            hash:   format!("{}", hash.to_hex()),
+                            size:   self.blocksize,
+                        };
+                        self.bufpos  = 0;
+                        self.buflen  = 0;
+                        self.hashpos = 0;
+                        return Some(r);
+                    }
                     return None;
                 }
+
             }
 
             self.chunker.roll_byte(self.buf[self.bufpos]);

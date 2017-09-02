@@ -6,8 +6,10 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use elf::utils;
 use elf::types;
 use std::env;
-use std::path::PathBuf;
+use std::fs::File;
 use std::fs::OpenOptions;
+use byteorder::WriteBytesExt;
+use byteorder::{ByteOrder, LittleEndian, NativeEndian};
 
 const R_X86_64_NONE       :u32 = 0;
 const R_X86_64_64         :u32 = 1;
@@ -45,12 +47,18 @@ pub struct Elf64Rela {
     addend: i64, //Elf64_Sxword
 }
 
-fn dislocate<T>(mut io: T, f: &elf::File, sec: &elf::Section)  where T: Read + Seek + Write {
+fn dislocate(mut target: &File, f: &elf::File, sec: &elf::Section, mut disloc: &File) {
+
+    let file_len = target.metadata().unwrap().len();
+
     let mut secdata = &sec.data[..];
     while let Ok(offset) = read_u64!(f, secdata) {
         let info         = read_u64!(f, secdata).unwrap();
         let addend       = read_u64!(f, secdata).unwrap();
 
+        if offset >= file_len {
+            continue;
+        }
         let sym   = info >> 32;
         let rtype = (info & 0xffffffff) as u32;
 
@@ -60,12 +68,34 @@ fn dislocate<T>(mut io: T, f: &elf::File, sec: &elf::Section)  where T: Read + S
             R_X86_64_GOTPCREL | R_X86_64_PC32 | R_X86_64_GOT32 | R_X86_64_PLT32 |
                 R_X86_64_TLSGD | R_X86_64_TLSLD | R_X86_64_DTPOFF32 | R_X86_64_GOTTPOFF |
                 R_X86_64_32 => {
-                io.seek(SeekFrom::Start(offset)).unwrap();
-                io.write(&[0;4]).unwrap();
+
+                target.seek(SeekFrom::Start(offset)).unwrap();
+                let mut orig = [0;4];
+                target.read(&mut orig).unwrap();
+                if orig != [0;4] {
+                    target.seek(SeekFrom::Start(offset)).unwrap();
+                    target.write(&[0;4]).unwrap();
+
+                    disloc.write_u64::<NativeEndian>(offset).unwrap();
+                    disloc.write(&[1]).unwrap();
+                    disloc.write(&orig).unwrap();
+                }
+
+
             },
             R_X86_64_64|R_X86_64_JUMP_SLOT|R_X86_64_RELATIVE|R_X86_64_GLOB_DAT|R_X86_64_DTPOFF64 => {
-                io.seek(SeekFrom::Start(offset)).unwrap();
-                io.write(&[0;8]).unwrap();
+
+                target.seek(SeekFrom::Start(offset)).unwrap();
+                let mut orig = [0;8];
+                target.read(&mut orig).unwrap();
+                if orig != [0;8] {
+                    target.seek(SeekFrom::Start(offset)).unwrap();
+                    target.write(&[0;8]).unwrap();
+
+                    disloc.write_u64::<NativeEndian>(offset).unwrap();
+                    disloc.write(&[2]).unwrap();
+                    disloc.write(&orig).unwrap();
+                }
             },
             _ => {
                 println!("not dislocating reloc type {:?} at {}", rtype, offset);
@@ -75,21 +105,24 @@ fn dislocate<T>(mut io: T, f: &elf::File, sec: &elf::Section)  where T: Read + S
 }
 
 fn main() {
-    for filename in env::args().skip(1) {
-        let path = PathBuf::from(filename.clone());
-        let mut file = OpenOptions::new().read(true).write(true).open(path).unwrap();
 
-        let f = elf::File::open_stream(&mut file).unwrap();
-        for sec in &f.sections {
+    let target_filename  = env::args().nth(1).unwrap();
+    let symbols_filename = env::args().nth(2).unwrap();
+    let disloc_filename  = env::args().nth(3).unwrap();
 
-            match sec.shdr.name.as_ref() {
-                ".rela.text" | ".rela.rodata" | ".rela.eh_frame" | ".rela.data.rel.ro" => {
-                    println!("relocating {}", sec.shdr.name); 
-                    dislocate(&file, &f, &sec);
-                },
-                _ => {},
-            }
+    let mut target_file  = OpenOptions::new().read(true).write(true).open(target_filename).unwrap();
+    let mut symbols_file = OpenOptions::new().read(true).open(symbols_filename).unwrap();
+    let mut disloc_file  = OpenOptions::new().truncate(true).write(true).create(true).open(disloc_filename).unwrap();
 
+    let symbols_elf = elf::File::open_stream(&mut symbols_file).unwrap();
+    for sec in &symbols_elf.sections {
+        match sec.shdr.name.as_ref() {
+            ".rela.text" | ".rela.rodata" |  ".rela.data.rel.ro" => {
+                println!("relocating {}", sec.shdr.name);
+                dislocate(&target_file, &symbols_elf, &sec, &disloc_file);
+            },
+            _ => {},
         }
+
     }
 }

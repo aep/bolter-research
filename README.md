@@ -19,10 +19,7 @@ For example the linker strips hyper server stuff when linking the client.
 | stripped | 1.4M    | 1.3M    | 2.7M  | 1.6M (59%)  |
 
 multicall is obviously very efficient. we'll have to be pretty clever to get even close to that.
-The stripped binary looks abit worse here on paper because the sections where sharing
-is most efficient have been removed (such as string tables, debug things).
-Since we only really care about the efficiency of a binary that goes on a real device,
-the rest of the tests are always stripped as much as possible,
+The stripped binary is what will end up on a target, so 59% is our benchmark.
 
 testing dedup algos:
 
@@ -66,6 +63,35 @@ cargo run --bin dislocate ./testbin/target/release/client ./testbin/target/relea
 |elf        | 80.24%      | 4336   |
 
 
-elf is already outperforming bup, but still significantly worse than multicall
+elf is already outperforming bup, but still significantly worse than multicall.
+bup is only really increasing in efficiency because we have to carry over the relocation info for dislocate
+to work and the symtab for elf. those compress well with rolling hash, but we dont care about those in our
+final storage.
+Hence, next step is moving to a model where debug symbols are separated from the binary we want to store.
+see test.sh
 
+```
+objcopy client --only-keep-debug client.d
+strip client
+cargo run --bin dislocate client
+```
+
+| alogrithm | compression | shards |
+|-----------|-------------|--------|
+|bup(15)    | 95.61%      | 67     |
+|bup(13)    | 91.71%      | 240    |
+|bup(11)    | 90.09%      | 875    |
+|bup(7)     | 86.94%      | 13015  |
+|elf        | 60.14%      | 4361   |
+
+
+Elf looks really impressive, and this would be a win... if the compressed output would actually work.
+Dislocate removes the relocations but doesn't store them yet.
+just quickly slapping the location info to the end of the binary yields:
+
+|-----------|-------------|--------|
+|bup(11)    | 79.48%      | 1156   |
+|elf        | 70.29%      | 4316   |
+
+reasonably good, but still too far off from our 59%
 
