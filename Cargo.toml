@@ -1,11 +1,27 @@
 [package]
-name = "bitchop"
+name = "bolter"
 version = "0.1.0"
 authors = ["Arvid E. Picciani <aep@exys.org>"]
 
 [dependencies]
 elf = "0.0.10"
 sha2 = "0.6"
-term = "0.4.6"
+generic-array = "0.8"
+colored = "1.5"
+byteorder = "0.*"
+rollsum = "0.2"
+digest = "0.6"
+hex = "0.2"
 
+[[bin]]
+name = "elf"
+path = "src/elf.rs"
+
+[[bin]]
+name = "dislocate"
+path = "src/dislocate.rs"
+
+[[bin]]
+name = "roll"
+path = "src/roll.rs"
 

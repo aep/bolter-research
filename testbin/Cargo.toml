@@ -1,0 +1,27 @@
+[package]
+name = "testbin"
+version = "0.1.0"
+authors = ["Arvid E. Picciani <aep@exys.org>"]
+
+[[bin]]
+name = "multicall"
+path = "src/multicall.rs"
+
+[[bin]]
+name = "client"
+path = "src/client.rs"
+
+[[bin]]
+name = "server"
+path = "src/server.rs"
+
+[dependencies]
+futures = "0.1.14"
+tokio-core = "0.1.6"
+hyper = "0.11"
+pretty_env_logger = "0.1"
+
+
+[profile.release]
+
+
